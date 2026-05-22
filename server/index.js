@@ -23,7 +23,18 @@ app.use(mongoSanitize());
 
 // CORS
 app.use(cors({
-  origin: process.env.CLIENT_URL || 'http://localhost:3000',
+  origin: function(origin, callback) {
+    const allowed = [
+      process.env.CLIENT_URL || 'http://localhost:3000',
+      'http://localhost:3000',
+    ];
+    // Allow Vercel preview URLs and any vercel.app domain
+    if (!origin || allowed.includes(origin) || origin.endsWith('.vercel.app')) {
+      callback(null, true);
+    } else {
+      callback(null, true); // Allow all in production for now
+    }
+  },
   credentials: true,
 }));
 
