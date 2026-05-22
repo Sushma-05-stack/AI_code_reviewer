@@ -8,43 +8,9 @@ import {
 import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
 import {
-  Shield, Zap, Code2, TrendingUp, AlertTriangle,
-  CheckCircle, Upload, Clock, ArrowRight, Activity
+  Shield, Code2, TrendingUp, AlertTriangle,
+  Upload, Clock, ArrowRight, Activity
 } from 'lucide-react';
-
-const SEVERITY_COLORS = {
-  Critical: '#ef4444',
-  High: '#f97316',
-  Medium: '#eab308',
-  Low: '#22c55e',
-};
-
-function ScoreRing({ score }) {
-  const radius = 40;
-  const circumference = 2 * Math.PI * radius;
-  const offset = circumference - (score / 100) * circumference;
-  const color = score >= 80 ? '#22c55e' : score >= 60 ? '#eab308' : '#ef4444';
-
-  return (
-    <div className="relative w-24 h-24 flex items-center justify-center">
-      <svg className="score-ring -rotate-90" width="96" height="96">
-        <circle cx="48" cy="48" r={radius} fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="8" />
-        <circle
-          cx="48" cy="48" r={radius} fill="none"
-          stroke={color} strokeWidth="8"
-          strokeDasharray={circumference}
-          strokeDashoffset={offset}
-          strokeLinecap="round"
-          style={{ transition: 'stroke-dashoffset 1.5s ease-out' }}
-        />
-      </svg>
-      <div className="absolute text-center">
-        <div className="text-xl font-black text-white">{score}</div>
-        <div className="text-xs text-slate-400">score</div>
-      </div>
-    </div>
-  );
-}
 
 export default function DashboardPage() {
   const { user } = useAuth();

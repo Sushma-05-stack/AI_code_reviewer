@@ -1,12 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { RadarChart, Radar, PolarGrid, PolarAngleAxis, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell } from 'recharts';
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell } from 'recharts';
 import Editor from '@monaco-editor/react';
 import api from '../services/api';
 import toast from 'react-hot-toast';
 import {
-  Shield, Zap, Code2, Download, ChevronDown, ChevronUp,
+  Code2, Download, ChevronDown, ChevronUp,
   AlertTriangle, CheckCircle, Info, ArrowLeft, FileText, Copy
 } from 'lucide-react';
 

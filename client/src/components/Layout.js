@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';
 import {
   LayoutDashboard, Upload, History, Settings, LogOut,
-  Code2, Menu, X, ChevronRight, Bell, User
+  Code2, Menu, ChevronRight, Bell, User
 } from 'lucide-react';
 
 const navItems = [

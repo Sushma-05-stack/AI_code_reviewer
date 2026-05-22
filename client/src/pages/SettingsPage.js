@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
-import api from '../services/api';
 import { User, Lock, Bell, Shield, Save, Eye, EyeOff } from 'lucide-react';
 
 export default function SettingsPage() {

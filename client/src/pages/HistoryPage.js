@@ -4,7 +4,7 @@ import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
 import api from '../services/api';
 import {
-  Code2, Trash2, Download, Eye, Search, Filter,
+  Code2, Trash2, Download, Search,
   ChevronLeft, ChevronRight, GitBranch, Upload, FileCode
 } from 'lucide-react';
 
