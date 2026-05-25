@@ -1,8 +1,39 @@
 const axios = require('axios');
+require('dotenv').config();
+
+// ── LangSmith setup ──────────────────────────────────────────────────────────
+let traceable = null;
+let langsmithEnabled = false;
+
+try {
+  if (process.env.LANGSMITH_API_KEY && process.env.LANGSMITH_TRACING === 'true') {
+    process.env.LANGCHAIN_TRACING_V2 = 'true';
+    process.env.LANGCHAIN_ENDPOINT = process.env.LANGSMITH_ENDPOINT || 'https://api.smith.langchain.com';
+    process.env.LANGCHAIN_API_KEY = process.env.LANGSMITH_API_KEY;
+    process.env.LANGCHAIN_PROJECT = process.env.LANGSMITH_PROJECT || 'genai';
+
+    const ls = require('langsmith/traceable');
+    traceable = ls.traceable;
+    langsmithEnabled = true;
+    console.log(`✅ LangSmith tracing enabled — project: ${process.env.LANGCHAIN_PROJECT}`);
+  }
+} catch (e) {
+  console.warn('LangSmith not available, tracing disabled:', e.message);
+}
 
 /**
- * Builds the AI prompt for code review
+ * Wrap a function with LangSmith tracing if enabled
  */
+function withTrace(fn, name, metadata = {}) {
+  if (!langsmithEnabled || !traceable) return fn;
+  return traceable(fn, {
+    name,
+    run_type: 'llm',
+    metadata,
+  });
+}
+
+// ── Prompt builder ───────────────────────────────────────────────────────────
 function buildReviewPrompt(code, reviewType, language, fileName) {
   const reviewFocus = {
     Security: 'Focus heavily on security vulnerabilities: SQL injection, XSS, hardcoded secrets, insecure dependencies, authentication flaws, CSRF, path traversal, and OWASP Top 10.',
@@ -61,10 +92,8 @@ Rules:
 - If no issues found, return empty issues array with high score`;
 }
 
-/**
- * Call Gemini API for code review
- */
-async function reviewWithGemini(code, reviewType, language, fileName) {
+// ── Gemini review ────────────────────────────────────────────────────────────
+async function _reviewWithGemini(code, reviewType, language, fileName) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey || apiKey === 'your_gemini_api_key') {
     throw new Error('Gemini API key not configured');
@@ -76,10 +105,7 @@ async function reviewWithGemini(code, reviewType, language, fileName) {
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
     {
       contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: {
-        temperature: 0.2,
-        maxOutputTokens: 8192,
-      },
+      generationConfig: { temperature: 0.2, maxOutputTokens: 8192 },
     },
     { timeout: 60000 }
   );
@@ -90,10 +116,8 @@ async function reviewWithGemini(code, reviewType, language, fileName) {
   return parseAIResponse(text);
 }
 
-/**
- * Call OpenAI API for code review
- */
-async function reviewWithOpenAI(code, reviewType, language, fileName) {
+// ── OpenAI review ────────────────────────────────────────────────────────────
+async function _reviewWithOpenAI(code, reviewType, language, fileName) {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey || apiKey === 'your_openai_api_key') {
     throw new Error('OpenAI API key not configured');
@@ -106,20 +130,14 @@ async function reviewWithOpenAI(code, reviewType, language, fileName) {
     {
       model: 'gpt-4o-mini',
       messages: [
-        {
-          role: 'system',
-          content: 'You are an expert code reviewer. Always respond with valid JSON only.',
-        },
+        { role: 'system', content: 'You are an expert code reviewer. Always respond with valid JSON only.' },
         { role: 'user', content: prompt },
       ],
       temperature: 0.2,
       max_tokens: 8192,
     },
     {
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       timeout: 60000,
     }
   );
@@ -130,36 +148,31 @@ async function reviewWithOpenAI(code, reviewType, language, fileName) {
   return parseAIResponse(text);
 }
 
-/**
- * Parse and validate AI JSON response
- */
+// Wrap with LangSmith tracing
+const reviewWithGemini = withTrace(_reviewWithGemini, 'gemini-code-review', { provider: 'gemini', model: 'gemini-1.5-flash' });
+const reviewWithOpenAI = withTrace(_reviewWithOpenAI, 'openai-code-review', { provider: 'openai', model: 'gpt-4o-mini' });
+
+// ── Response parser ──────────────────────────────────────────────────────────
 function parseAIResponse(text) {
-  // Strip markdown code blocks if present
   let cleaned = text.trim();
   cleaned = cleaned.replace(/^```json\s*/i, '').replace(/\s*```$/i, '');
   cleaned = cleaned.replace(/^```\s*/i, '').replace(/\s*```$/i, '');
 
   try {
     const parsed = JSON.parse(cleaned);
-
-    // Validate and normalize
     return {
       overallScore: Math.min(100, Math.max(0, Number(parsed.overallScore) || 70)),
       summary: parsed.summary || 'Code review completed.',
       issues: Array.isArray(parsed.issues)
         ? parsed.issues.map((issue) => ({
-            severity: ['Critical', 'High', 'Medium', 'Low'].includes(issue.severity)
-              ? issue.severity
-              : 'Medium',
+            severity: ['Critical', 'High', 'Medium', 'Low'].includes(issue.severity) ? issue.severity : 'Medium',
             file: issue.file || 'unknown',
             line: Number(issue.line) || 0,
             issue: issue.issue || '',
             impact: issue.impact || '',
             fix: issue.fix || '',
             optimizedCode: issue.optimizedCode || '',
-            category: ['Security', 'Performance', 'Quality', 'Bug', 'Style'].includes(issue.category)
-              ? issue.category
-              : 'Quality',
+            category: ['Security', 'Performance', 'Quality', 'Bug', 'Style'].includes(issue.category) ? issue.category : 'Quality',
           }))
         : [],
       optimizedCode: parsed.optimizedCode || '',
@@ -168,7 +181,6 @@ function parseAIResponse(text) {
     };
   } catch (e) {
     console.error('Failed to parse AI response:', e.message);
-    // Return a fallback response
     return {
       overallScore: 50,
       summary: 'AI analysis completed. Manual review recommended for detailed findings.',
@@ -184,52 +196,7 @@ function parseAIResponse(text) {
   }
 }
 
-/**
- * Main review function — tries Gemini first, falls back to OpenAI
- */
-async function reviewCode(code, reviewType = 'Full Audit', language = 'JavaScript', fileName = 'code.js') {
-  // Truncate very large files to avoid token limits
-  const maxChars = 15000;
-  const truncated = code.length > maxChars;
-  const codeToReview = truncated ? code.substring(0, maxChars) + '\n// ... (truncated for analysis)' : code;
-
-  let result;
-  let provider = 'none';
-
-  // Try Gemini first
-  const geminiKey = process.env.GEMINI_API_KEY;
-  const openaiKey = process.env.OPENAI_API_KEY;
-
-  if (geminiKey && geminiKey !== 'your_gemini_api_key') {
-    try {
-      result = await reviewWithGemini(codeToReview, reviewType, language, fileName);
-      provider = 'gemini';
-    } catch (err) {
-      console.warn('Gemini failed, trying OpenAI:', err.message);
-    }
-  }
-
-  if (!result && openaiKey && openaiKey !== 'your_openai_api_key') {
-    try {
-      result = await reviewWithOpenAI(codeToReview, reviewType, language, fileName);
-      provider = 'openai';
-    } catch (err) {
-      console.warn('OpenAI failed:', err.message);
-    }
-  }
-
-  if (!result) {
-    // Demo mode — return mock analysis
-    result = generateMockReview(code, reviewType, language, fileName);
-    provider = 'demo';
-  }
-
-  return { ...result, provider, truncated };
-}
-
-/**
- * Demo/mock review when no API keys are configured
- */
+// ── Demo/mock review ─────────────────────────────────────────────────────────
 function generateMockReview(code, reviewType, language, fileName) {
   const lines = code.split('\n').length;
   const hasHardcodedSecrets = /password\s*=\s*['"][^'"]+['"]|secret\s*=\s*['"][^'"]+['"]/i.test(code);
@@ -241,9 +208,7 @@ function generateMockReview(code, reviewType, language, fileName) {
 
   if (hasHardcodedSecrets) {
     issues.push({
-      severity: 'Critical',
-      file: fileName,
-      line: 1,
+      severity: 'Critical', file: fileName, line: 1,
       issue: 'Hardcoded credentials detected in source code',
       impact: 'Credentials exposed in version control, major security risk',
       fix: 'Move all secrets to environment variables using process.env',
@@ -251,25 +216,19 @@ function generateMockReview(code, reviewType, language, fileName) {
       category: 'Security',
     });
   }
-
   if (hasEval) {
     issues.push({
-      severity: 'High',
-      file: fileName,
-      line: 1,
+      severity: 'High', file: fileName, line: 1,
       issue: 'Use of eval() detected — dangerous code execution',
       impact: 'Allows arbitrary code execution, XSS vulnerability',
-      fix: 'Replace eval() with safer alternatives like JSON.parse() or Function constructor',
+      fix: 'Replace eval() with safer alternatives like JSON.parse()',
       optimizedCode: '',
       category: 'Security',
     });
   }
-
   if (hasSQLConcat) {
     issues.push({
-      severity: 'Critical',
-      file: fileName,
-      line: 1,
+      severity: 'Critical', file: fileName, line: 1,
       issue: 'Potential SQL injection via string concatenation',
       impact: 'Database could be compromised by malicious input',
       fix: 'Use parameterized queries or prepared statements',
@@ -277,12 +236,9 @@ function generateMockReview(code, reviewType, language, fileName) {
       category: 'Security',
     });
   }
-
   if (hasConsoleLog) {
     issues.push({
-      severity: 'Low',
-      file: fileName,
-      line: 1,
+      severity: 'Low', file: fileName, line: 1,
       issue: 'console.log statements found in production code',
       impact: 'Performance overhead and potential information leakage',
       fix: 'Remove console.log or use a proper logging library',
@@ -315,5 +271,47 @@ function generateMockReview(code, reviewType, language, fileName) {
     },
   };
 }
+
+// ── Main review function ─────────────────────────────────────────────────────
+async function _reviewCode(code, reviewType = 'Full Audit', language = 'JavaScript', fileName = 'code.js') {
+  const maxChars = 15000;
+  const truncated = code.length > maxChars;
+  const codeToReview = truncated ? code.substring(0, maxChars) + '\n// ... (truncated for analysis)' : code;
+
+  let result;
+  let provider = 'none';
+
+  const geminiKey = process.env.GEMINI_API_KEY;
+  const openaiKey = process.env.OPENAI_API_KEY;
+
+  if (geminiKey && geminiKey !== 'your_gemini_api_key') {
+    try {
+      result = await reviewWithGemini(codeToReview, reviewType, language, fileName);
+      provider = 'gemini';
+    } catch (err) {
+      console.warn('Gemini failed, trying OpenAI:', err.message);
+    }
+  }
+
+  if (!result && openaiKey && openaiKey !== 'your_openai_api_key') {
+    try {
+      result = await reviewWithOpenAI(codeToReview, reviewType, language, fileName);
+      provider = 'openai';
+    } catch (err) {
+      console.warn('OpenAI failed:', err.message);
+    }
+  }
+
+  if (!result) {
+    result = generateMockReview(code, reviewType, language, fileName);
+    provider = 'demo';
+  }
+
+  console.log(`✅ Review complete — provider: ${provider}, score: ${result.overallScore}, issues: ${result.issues.length}`);
+  return { ...result, provider, truncated };
+}
+
+// Wrap main review function with LangSmith tracing
+const reviewCode = withTrace(_reviewCode, 'ai-code-review', { service: 'ai-code-reviewer' });
 
 module.exports = { reviewCode };
